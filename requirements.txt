@@ -1,0 +1,8 @@
+dashscope
+faiss-cpu
+gradio
+langchain_community
+openai
+opencv-python
+Pillow
+pymupdf

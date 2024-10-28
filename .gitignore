@@ -1,0 +1,35 @@
+# Ignore all .log files
+*.log
+
+# Ignore temporary files created by the OS
+*.tmp
+
+# Ignore directories
+/temp/
+/build/
+/node_modules/
+**/bin/
+**/include/
+**/lib/
+**/_pycache_/
+**/lib64/
+.gradio
+
+# Ignore files related to IDEs
+# For VS Code
+.vscode/
+# For JetBrains IDEs
+.idea/
+
+# Ignore compiled Python or Java files
+*.class
+*.pyc
+
+# Ignore environment variables file
+.env
+
+# Ignore macOS system files
+.DS_Store
+
+# Ignore package lock files for Node.js
+package-lock.json
