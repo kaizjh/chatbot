@@ -17,7 +17,7 @@ IMAGE_SYSTEM_PROMPT = "你是Kai，一个由无名氏开发的善于分析图片
 
 VIDEO_SYSTEM_PROMPT = "你是Kai，一个由无名氏开发的善于分析视频的智能助手，你会尽全力帮助用户，用温和的语气来解答用户的疑问，也可以使用表情来使对话更加生动。"
 
-RAG_SYSTEM_PROMPT = "你是Kai，一个由无名氏开发的善于分析文件的智能助手，你会尽全力帮助用户，用温和的语气来解答用户的疑问，也可以使用表情来使对话更加生动。"
+PDF_SYSTEM_PROMPT = "你是Kai，一个由无名氏开发的善于分析文件的智能助手，你会尽全力帮助用户，用温和的语气来解答用户的疑问，也可以使用表情来使对话更加生动。"
 # 这个system Prompt离最新的Prompt太远了，中间隔了一个History，效果不行
 # "你是Kai，一个由无名氏开发的全能的智能助手，在最新的用户输入中会有一个视频，如果用户没有附上提问或者说明，你将会主动分析该视频；如果用户有针对该视频的提问或说明，你会尽全力帮助用户，用温和的语气来解答用户的疑问。也可以使用表情来使对话更加生动。"
 
@@ -31,24 +31,18 @@ client = OpenAI(
 
 
 def model_inference(user_prompt, history):
-    """
-    根据用户输入处理模型推理。此函数根据用户的文本或文件输入生成流式响应。
-
-    参数:
-    - user_prompt: 包含用户输入的字典，可以包含 'text' 或 'files' 键。
-    - history: 用户与助手之间的消息历史记录列表。
-
-    生成:
-    - 流式模型响应，逐步返回模型生成的文本。
-    """
     if user_prompt["files"]:
-        # 如果有文件上传，调用 file_inference 函数处理文件推理
-        for chunk in pdf_inference(user_prompt, history):
-            yield chunk
+        file = user_prompt["files"][0]
+        # 处理PDF文件
+        if file.endswith("pdf"):
+            for chunk in pdf_handler(user_prompt, history):
+                yield chunk
+        # 处理图像、视频以及其他文件
+        else:
+            for chunk in image_and_video_handler(user_prompt, history):
+                yield chunk
     else:
         # 如果没有输入文本或历史记录，初始化为空
-        if user_prompt is None:
-            user_prompt = ''
         if history is None:
             history = []
 
@@ -71,17 +65,55 @@ def model_inference(user_prompt, history):
                 full_response += chunk.choices[0].delta.content
                 yield full_response
 
-def pdf_inference(user_prompt, history):
+
+def image_and_video_handler(user_prompt, history):
     if history is None:
         history = []
 
-    messages = history_to_messages(history, RAG_SYSTEM_PROMPT)
+    text_and_image = []
+    for file in user_prompt["files"]:
+        if file.endswith(video_extensions):
+            # 如果文件是视频，处理视频输入
+            messages = history_to_messages(history, VIDEO_SYSTEM_PROMPT)
+            text_and_image.append({"type": "video", "video": video_to_base64_urls(file)})
+            if user_prompt["text"]:
+                text_and_image.append({"type": "text", "text": user_prompt["text"]})
+            else:
+                text_and_image.append({"type": "text", "text": "分析一下现在上传的这个视频"})
+        elif file.endswith(tuple([i for i, f in image_extensions.items()])):
+            # 如果文件是图片，处理图片输入
+            messages = history_to_messages(history, IMAGE_SYSTEM_PROMPT)
+            text_and_image.append({"type": "image_url", "image_url": {"url": image_to_base64_url(file)}})
+            text_and_image.append({"type": "text", "text": user_prompt["text"]})
+    
+    messages.append({'role': "user", 'content': text_and_image})
+    
+    # 调用模型生成响应，流式输出
+    response = client.chat.completions.create(
+        model="qwen-vl-max-latest",
+        messages=messages,
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+    
+    # 累积完整的响应内容
+    full_response = ""
+    for chunk in response:
+        if chunk.choices:
+            full_response += chunk.choices[0].delta.content
+            yield full_response
 
-    files = user_prompt["files"]
+
+def pdf_handler(user_prompt, history):
+
+    if history is None:
+        history = []
+
+    messages = history_to_messages(history, PDF_SYSTEM_PROMPT)    
+
     # 初始化一个空字符串来存储提取的文本
     result = ''
-    
-    for file in files:
+    for file in user_prompt["files"]:
         doc = fitz.open(file)
         # 遍历 PDF 文件中的每一页
         for page_num in range(doc.page_count):
@@ -108,7 +140,7 @@ def pdf_inference(user_prompt, history):
     relvants = ""
     for i in range(len(docs)):
         relvants += docs[i].page_content
-    
+
     messages.append({'role': "user", 'content': relvants + "/n" +query})
 
     
@@ -126,66 +158,7 @@ def pdf_inference(user_prompt, history):
         if chunk.choices:
             full_response += chunk.choices[0].delta.content
             yield full_response
-
-
-# def file_inference(user_prompt, history):
-#     for file in user_prompt["files"]:
-        # if file.endswith(video_extensions):
-        #     image_handler()
-        # elif file.endswith(tuple([i for i, f in image_extensions.items()])):
-        #     # 如果文件是图片，处理图片输入
-        #     messages = history_to_messages(history, IMAGE_SYSTEM_PROMPT)
-        #     text_and_image.append({"type": "image_url", "image_url": {"url": image_to_base64_url(file)}})
-        #     text_and_image.append({"type": "text", "text": user_prompt["text"]})
-        # elif file.endswith("pdf"):
-
-# def image_handler(user_prompt, history):
-#     messages = history_to_messages(history, VIDEO_SYSTEM_PROMPT)
-#     text_and_image.append({"type": "video", "video": video_to_base64_urls(file)})
-#     if user_prompt["text"]:
-#         text_and_image.append({"type": "text", "text": user_prompt["text"]})
-#     else:
-#         text_and_image.append({"type": "text", "text": "分析一下现在上传的这个视频"})
-
-# def image_and_video_inference(user_prompt, history):
-#     """
-#     处理文件输入推理，支持图片或视频上传。
-
-#     参数:
-#     - user_prompt: 包含用户文件的字典。
-#     - history: 用户与助手之间的消息历史记录列表。
-
-#     生成:
-#     - 流式模型响应，逐步返回模型生成的文本。
-#     """    
-#     if history is None:
-#         history = []
-
-#     # 处理多个图片或视频文件上传
-#     text_and_image = []
     
-
-
-    
-#     messages.append({'role': "user", 'content': text_and_image})
-
-    
-#     # 调用模型生成响应，流式输出
-#     response = client.chat.completions.create(
-#         model="qwen-vl-max-latest",
-#         messages=messages,
-#         stream=True,
-#         stream_options={"include_usage": True},
-#     )
-    
-#     # 累积完整的响应内容
-#     full_response = ""
-#     for chunk in response:
-#         if chunk.choices:
-#             full_response += chunk.choices[0].delta.content
-#             yield full_response
-
-
 
 def history_to_messages(history, system_prompt):
     """
@@ -203,7 +176,7 @@ def history_to_messages(history, system_prompt):
         if h["role"] == "user":
             if type(h['content']) == tuple:
                 # 当用户上传图片或视频时，特殊处理此消息
-                messages.append({'role': "user", 'content': "我上传了一张图片或者视频"})
+                messages.append({'role': "user", 'content': "用户上传了一张图片或者视频"})
             else:
                 messages.append({'role': "user", 'content': h["content"]})
         elif h["role"] == "assistant":
