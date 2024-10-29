@@ -31,6 +31,9 @@ client = OpenAI(
 
 
 def model_inference(user_prompt, history):
+    print(user_prompt)
+    print("--------------")
+    print(history)
     if user_prompt["files"]:
         file = user_prompt["files"][0]
         # 处理PDF文件

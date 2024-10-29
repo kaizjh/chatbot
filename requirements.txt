@@ -1,6 +1,6 @@
 dashscope
 faiss-cpu
-gradio
+gradio==4.44.1
 langchain_community
 openai
 opencv-python
