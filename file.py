@@ -9,17 +9,45 @@ from openai import OpenAI
 from PIL import Image
 
 
-
-# "You are Kai, an exceptionally capable and versatile AI assistant made by Zen. You are provided with images and texts as input, You should answer users query in Structured, Detailed and Better way, in Human Style. You are also Expert in every field and also learn and try to answer from contexts related to previous question. Try your best to give best response possible to user. You reply in detail like human, use short forms, structured format, friendly tone and emotions."
-TEXT_SYSTEM_PROMPT = "你是Kai，一个由无名氏开发的全能的智能助手，你会尽全力帮助用户，用温和的语气来解答用户的疑问，也可以使用表情来使对话更加生动。"
-
-IMAGE_SYSTEM_PROMPT = "你是Kai，一个由无名氏开发的善于分析图片的智能助手，你会尽全力帮助用户，用温和的语气来解答用户的疑问，也可以使用表情来使对话更加生动。"
-
-VIDEO_SYSTEM_PROMPT = "你是Kai，一个由无名氏开发的善于分析视频的智能助手，你会尽全力帮助用户，用温和的语气来解答用户的疑问，也可以使用表情来使对话更加生动。"
-
-PDF_SYSTEM_PROMPT = "你是Kai，一个由无名氏开发的善于分析文件的智能助手，你会尽全力帮助用户，用温和的语气来解答用户的疑问，也可以使用表情来使对话更加生动。"
+SYSTEM_PROMPT = "You are Kai, an exceptionally capable and versatile AI assistant made by Zen. You are provided with images, videos and texts as input, You should answer users query in Structured, Detailed and Better way, in Human Style. You are also Expert in every field and also learn and try to answer from contexts related to previous question. Try your best to give best response possible to user. You reply in detail like human, use short forms, structured format, friendly tone and emotions."
 # 这个system Prompt离最新的Prompt太远了，中间隔了一个History，效果不行
-# "你是Kai，一个由无名氏开发的全能的智能助手，在最新的用户输入中会有一个视频，如果用户没有附上提问或者说明，你将会主动分析该视频；如果用户有针对该视频的提问或说明，你会尽全力帮助用户，用温和的语气来解答用户的疑问。也可以使用表情来使对话更加生动。"
+
+EXAMPLES = [
+    [
+        {
+            "text": "你好",
+        }
+    ],
+    [
+        {
+            "text": "自我介绍一下吧",
+        }
+    ],
+    [
+        {
+            "text": "lcm是什么？",
+        }
+    ],
+    [
+        {
+            "text": "lcm是什么？",
+            "files": ["example_files/lcm.pdf"]
+        }
+    ],
+    [
+        {
+            "text": "纸上写了什么字？",
+            "files": ["example_files/paper_with_text.png"]
+        }
+    ],
+    [
+        {
+            "text": "视频中的超级英雄是谁？",
+            "files": ["example_files/spiderman.gif"]
+        }
+    ],
+
+]
 
 image_extensions = Image.registered_extensions()
 video_extensions = ("avi", "mp4", "mov", "mkv", "flv", "wmv", "mjpeg", "wav", "gif", "webm", "m4v", "3gp")
@@ -32,71 +60,17 @@ client = OpenAI(
 
 def model_inference(user_prompt, history):
     if user_prompt["files"]:
-        for chunk in image_and_video_handler(user_prompt, history):
-            yield chunk
+        messages, model = file_handler(user_prompt, history)
     else:
         # 如果没有输入文本或历史记录，初始化为空
         if history is None:
             history = []
 
         # 将历史记录转换为消息格式，并追加当前用户输入
-        messages = history_to_messages(history, TEXT_SYSTEM_PROMPT)
+        messages = history_to_messages(history, SYSTEM_PROMPT)
         messages.append({'role': "user", 'content': user_prompt["text"]})
-        # 调用模型生成响应，流式输出
-        response = client.chat.completions.create(
-            model="qwen-plus",
-            messages=messages,
-            stream=True,
-            stream_options={"include_usage": True},
-        )
-        
-        # 累积完整的响应内容
-        full_response = ""
-        for chunk in response:
-            if chunk.choices:
-                full_response += chunk.choices[0].delta.content
-                yield full_response
-
-
-def image_and_video_handler(user_prompt, history):
-    if history is None:
-        history = []
-
-    text_and_image = []
-    print("-----------")
-    print(user_prompt)
-    for file in user_prompt["files"]:
-        # print(file)
-        # {'path': '/tmp/gradio/a40428c32a3ce02e71ae7bce2fb10eed4ffe5d1ff32bad98d633f831c128df1b/1.jpg', 'url': 'http://127.0.0.1:7869/file=/tmp/gradio/a40428c32a3ce02e71ae7bce2fb10eed4ffe5d1ff32bad98d633f831c128df1b/1.jpg', 'size': None, 'orig_name': '1.jpg', 'mime_type': 'image/jpeg', 'is_stream': False, 'meta': {'_type': 'gradio.FileData'}}
-        if file["path"].endswith(video_extensions):
-            # 如果文件是视频，处理视频输入
-            messages = history_to_messages(history, VIDEO_SYSTEM_PROMPT)
-            text_and_image.append({"type": "video", "video": file["url"]})
-            if user_prompt["text"]:
-                text_and_image.append({"type": "text", "text": user_prompt["text"]})
-            else:
-                text_and_image.append({"type": "text", "text": "分析一下现在上传的这个视频"})
-
-            messages.append({'role': "user", 'content': text_and_image})
-            yield call_llm(messages, "qwen-vl-max-latest")
-        elif file["path"].endswith(tuple([i for i, f in image_extensions.items()])):
-            # 如果文件是图片，处理图片输入
-            messages = history_to_messages(history, IMAGE_SYSTEM_PROMPT)
-            text_and_image.append({"type": "image_url", "image_url": {"url": file["url"]}})
-            text_and_image.append({"type": "text", "text": user_prompt["text"]})
-            
-            messages.append({'role': "user", 'content': text_and_image})
-            yield call_llm(messages, "qwen-vl-max-latest")
-        elif file["path"].endswith("pdf"):
-            messages = history_to_messages(history, PDF_SYSTEM_PROMPT)    
-            
-            result = retrieval(user_prompt)
-            
-            messages.append({'role': "user", 'content': result})
-            yield call_llm(messages, "qwen-plus")
-
-
-def call_llm(messages, model):
+        model = "qwen-plus"
+    
     # 调用模型生成响应，流式输出
     response = client.chat.completions.create(
         model=model,
@@ -110,7 +84,44 @@ def call_llm(messages, model):
     for chunk in response:
         if chunk.choices:
             full_response += chunk.choices[0].delta.content
-            yield full_response
+            yield full_response     
+
+
+def file_handler(user_prompt, history):
+    if history is None:
+        history = []
+
+    text_and_image = []
+    for file in user_prompt["files"]:
+        # print(file)
+        # {'path': '/tmp/gradio/a40428c32a3ce02e71ae7bce2fb10eed4ffe5d1ff32bad98d633f831c128df1b/1.jpg', 'url': 'http://127.0.0.1:7869/file=/tmp/gradio/a40428c32a3ce02e71ae7bce2fb10eed4ffe5d1ff32bad98d633f831c128df1b/1.jpg', 'size': None, 'orig_name': '1.jpg', 'mime_type': 'image/jpeg', 'is_stream': False, 'meta': {'_type': 'gradio.FileData'}}
+        if file["path"].endswith("pdf"):
+            messages = history_to_messages(history, SYSTEM_PROMPT)    
+            
+            result = retrieval(user_prompt)
+            
+            messages.append({'role': "user", 'content': result})
+            return messages, "qwen-plus"
+        elif file["path"].endswith(video_extensions):
+            # 如果文件是视频，处理视频输入
+            messages = history_to_messages(history, SYSTEM_PROMPT)
+            text_and_image.append({"type": "video", "video": video_to_base64_urls(file["path"])})
+            if user_prompt["text"]:
+                text_and_image.append({"type": "text", "text": user_prompt["text"]})
+            else:
+                text_and_image.append({"type": "text", "text": "分析一下现在上传的这个视频"})
+
+            messages.append({'role': "user", 'content': text_and_image})
+            return messages, "qwen-vl-max-latest"
+        
+        elif file["path"].endswith(tuple([i for i, f in image_extensions.items()])):
+            # 如果文件是图片，处理图片输入
+            messages = history_to_messages(history, SYSTEM_PROMPT)
+            text_and_image.append({"type": "image_url", "image_url": {"url": image_to_base64_url(file["path"])}})
+            text_and_image.append({"type": "text", "text": user_prompt["text"]})
+            
+            messages.append({'role': "user", 'content': text_and_image})
+            return messages, "qwen-vl-max-latest"
 
 
 def retrieval(user_prompt):

@@ -1,50 +1,5 @@
-from file import model_inference
+from file import EXAMPLES, model_inference
 import gradio as gr
-
-
-EXAMPLES = [
-    [
-        {
-            "text": "你好",
-        }
-    ],
-    [
-        {
-            "text": "自我介绍一下吧",
-        }
-    ],
-    [
-        {
-            "text": "lcm是什么？",
-        }
-    ],
-    [
-        {
-            "text": "lcm是什么？",
-            "files": ["example_files/lcm.pdf"]
-        }
-    ],
-    [
-        {
-            "text": "分析一下这张图片",
-            "files": ["example_files/1.jpg"]
-        }
-    ],
-    [
-        {
-            "text": "视频中的人物是谁？",
-            "files": ["example_files/1.gif"]
-        }
-    ],
-    [
-        {
-            "text": "这是游戏还是现实？",
-            "files": ["example_files/1.mp4"]
-        }
-    ],
-
-]
-
 
 # Main application block
 with gr.Blocks() as demo:
