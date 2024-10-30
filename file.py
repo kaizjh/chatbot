@@ -31,19 +31,9 @@ client = OpenAI(
 
 
 def model_inference(user_prompt, history):
-    print(user_prompt)
-    print("--------------")
-    print(history)
     if user_prompt["files"]:
-        file = user_prompt["files"][0]
-        # 处理PDF文件
-        if file.endswith("pdf"):
-            for chunk in pdf_handler(user_prompt, history):
-                yield chunk
-        # 处理图像、视频以及其他文件
-        else:
-            for chunk in image_and_video_handler(user_prompt, history):
-                yield chunk
+        for chunk in image_and_video_handler(user_prompt, history):
+            yield chunk
     else:
         # 如果没有输入文本或历史记录，初始化为空
         if history is None:
@@ -52,7 +42,6 @@ def model_inference(user_prompt, history):
         # 将历史记录转换为消息格式，并追加当前用户输入
         messages = history_to_messages(history, TEXT_SYSTEM_PROMPT)
         messages.append({'role': "user", 'content': user_prompt["text"]})
-        
         # 调用模型生成响应，流式输出
         response = client.chat.completions.create(
             model="qwen-plus",
@@ -60,7 +49,7 @@ def model_inference(user_prompt, history):
             stream=True,
             stream_options={"include_usage": True},
         )
-
+        
         # 累积完整的响应内容
         full_response = ""
         for chunk in response:
@@ -74,26 +63,43 @@ def image_and_video_handler(user_prompt, history):
         history = []
 
     text_and_image = []
+    print("-----------")
+    print(user_prompt)
     for file in user_prompt["files"]:
-        if file.endswith(video_extensions):
+        # print(file)
+        # {'path': '/tmp/gradio/a40428c32a3ce02e71ae7bce2fb10eed4ffe5d1ff32bad98d633f831c128df1b/1.jpg', 'url': 'http://127.0.0.1:7869/file=/tmp/gradio/a40428c32a3ce02e71ae7bce2fb10eed4ffe5d1ff32bad98d633f831c128df1b/1.jpg', 'size': None, 'orig_name': '1.jpg', 'mime_type': 'image/jpeg', 'is_stream': False, 'meta': {'_type': 'gradio.FileData'}}
+        if file["path"].endswith(video_extensions):
             # 如果文件是视频，处理视频输入
             messages = history_to_messages(history, VIDEO_SYSTEM_PROMPT)
-            text_and_image.append({"type": "video", "video": video_to_base64_urls(file)})
+            text_and_image.append({"type": "video", "video": file["url"]})
             if user_prompt["text"]:
                 text_and_image.append({"type": "text", "text": user_prompt["text"]})
             else:
                 text_and_image.append({"type": "text", "text": "分析一下现在上传的这个视频"})
-        elif file.endswith(tuple([i for i, f in image_extensions.items()])):
+
+            messages.append({'role': "user", 'content': text_and_image})
+            yield call_llm(messages, "qwen-vl-max-latest")
+        elif file["path"].endswith(tuple([i for i, f in image_extensions.items()])):
             # 如果文件是图片，处理图片输入
             messages = history_to_messages(history, IMAGE_SYSTEM_PROMPT)
-            text_and_image.append({"type": "image_url", "image_url": {"url": image_to_base64_url(file)}})
+            text_and_image.append({"type": "image_url", "image_url": {"url": file["url"]}})
             text_and_image.append({"type": "text", "text": user_prompt["text"]})
-    
-    messages.append({'role': "user", 'content': text_and_image})
-    
+            
+            messages.append({'role': "user", 'content': text_and_image})
+            yield call_llm(messages, "qwen-vl-max-latest")
+        elif file["path"].endswith("pdf"):
+            messages = history_to_messages(history, PDF_SYSTEM_PROMPT)    
+            
+            result = retrieval(user_prompt)
+            
+            messages.append({'role': "user", 'content': result})
+            yield call_llm(messages, "qwen-plus")
+
+
+def call_llm(messages, model):
     # 调用模型生成响应，流式输出
     response = client.chat.completions.create(
-        model="qwen-vl-max-latest",
+        model=model,
         messages=messages,
         stream=True,
         stream_options={"include_usage": True},
@@ -107,17 +113,11 @@ def image_and_video_handler(user_prompt, history):
             yield full_response
 
 
-def pdf_handler(user_prompt, history):
-
-    if history is None:
-        history = []
-
-    messages = history_to_messages(history, PDF_SYSTEM_PROMPT)    
-
+def retrieval(user_prompt):
     # 初始化一个空字符串来存储提取的文本
     result = ''
     for file in user_prompt["files"]:
-        doc = fitz.open(file)
+        doc = fitz.open(file["path"])
         # 遍历 PDF 文件中的每一页
         for page_num in range(doc.page_count):
             page = doc.load_page(page_num)  # 加载当前页
@@ -144,24 +144,8 @@ def pdf_handler(user_prompt, history):
     for i in range(len(docs)):
         relvants += docs[i].page_content
 
-    messages.append({'role': "user", 'content': relvants + "/n" +query})
+    return relvants + "/n" +query
 
-    
-    # 调用模型生成响应，流式输出
-    response = client.chat.completions.create(
-        model="qwen-plus",
-        messages=messages,
-        stream=True,
-        stream_options={"include_usage": True},
-    )
-    
-    # 累积完整的响应内容
-    full_response = ""
-    for chunk in response:
-        if chunk.choices:
-            full_response += chunk.choices[0].delta.content
-            yield full_response
-    
 
 def history_to_messages(history, system_prompt):
     """

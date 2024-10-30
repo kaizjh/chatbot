@@ -18,6 +18,31 @@ EXAMPLES = [
             "text": "lcm是什么？",
         }
     ],
+    [
+        {
+            "text": "lcm是什么？",
+            "files": ["example_files/lcm.pdf"]
+        }
+    ],
+    [
+        {
+            "text": "分析一下这张图片",
+            "files": ["example_files/1.jpg"]
+        }
+    ],
+    [
+        {
+            "text": "视频中的人物是谁？",
+            "files": ["example_files/1.gif"]
+        }
+    ],
+    [
+        {
+            "text": "这是游戏还是现实？",
+            "files": ["example_files/1.mp4"]
+        }
+    ],
+
 ]
 
 
