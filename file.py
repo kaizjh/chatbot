@@ -22,12 +22,7 @@ WEB_SYSTEM_PROMPT = "You are Kai, a helpful and very powerful web assistant made
 EXAMPLES = [
     [
         {
-            "text": "你好",
-        }
-    ],
-    [
-        {
-            "text": "自我介绍一下吧",
+            "text": "你好，我叫张三李四，你呢？",
         }
     ],
     [
@@ -56,6 +51,11 @@ EXAMPLES = [
     [
         {
             "text": "今天上海的天气怎么样？",
+        }
+    ],
+    [
+        {
+            "text": "我叫什么？",
         }
     ],
 ]
@@ -172,9 +172,7 @@ def model_inference(user_prompt, history):
             messages = history_to_messages(history, SYSTEM_PROMPT)
             messages.append({'role': "user", 'content': user_prompt["text"]})
             model = "qwen-plus"
-    
-    with open("messages.txt", "w") as file:
-        file.write(str(messages))
+            
     # 调用模型生成响应，流式输出
     response = client.chat.completions.create(
         model=model,
