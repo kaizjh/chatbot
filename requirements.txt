@@ -1,7 +1,9 @@
+bs4
 dashscope
 faiss-cpu
 gradio==4.44.1
 langchain_community
+langchain_openai
 openai
 opencv-python
 Pillow

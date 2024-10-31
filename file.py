@@ -97,9 +97,7 @@ def file_handler(user_prompt, history):
         # {'path': '/tmp/gradio/a40428c32a3ce02e71ae7bce2fb10eed4ffe5d1ff32bad98d633f831c128df1b/1.jpg', 'url': 'http://127.0.0.1:7869/file=/tmp/gradio/a40428c32a3ce02e71ae7bce2fb10eed4ffe5d1ff32bad98d633f831c128df1b/1.jpg', 'size': None, 'orig_name': '1.jpg', 'mime_type': 'image/jpeg', 'is_stream': False, 'meta': {'_type': 'gradio.FileData'}}
         if file["path"].endswith("pdf"):
             messages = history_to_messages(history, SYSTEM_PROMPT)    
-            
             result = retrieval(user_prompt)
-            
             messages.append({'role': "user", 'content': result})
             return messages, "qwen-plus"
         elif file["path"].endswith(video_extensions):
