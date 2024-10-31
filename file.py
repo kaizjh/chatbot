@@ -1,15 +1,22 @@
 import base64
+from bs4 import BeautifulSoup
 import cv2
 import fitz # pymupdf
+from functools import lru_cache
+import gradio as gr
+import json
 from langchain_community.embeddings.dashscope import DashScopeEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-import os
 from openai import OpenAI
+import os
 from PIL import Image
+import requests
+from typing import List
 
 
 SYSTEM_PROMPT = "You are Kai, an exceptionally capable and versatile AI assistant made by Zen. You are provided with images, videos and texts as input, You should answer users query in Structured, Detailed and Better way, in Human Style. You are also Expert in every field and also learn and try to answer from contexts related to previous question. Try your best to give best response possible to user. You reply in detail like human, use short forms, structured format, friendly tone and emotions."
+WEB_SYSTEM_PROMPT = "You are Kai, a helpful and very powerful web assistant made by Zen. You are provided with WEB results from which you can find informations to answer users query in Structured, Detailed and Better way, in Human Style. You are also Expert in every field and also learn and try to answer from contexts related to previous question. Try your best to give best response possible to user. You reply in detail like human, use short forms, structured format, friendly tone and emotions."
 # 这个system Prompt离最新的Prompt太远了，中间隔了一个History，效果不行
 
 EXAMPLES = [
@@ -46,7 +53,11 @@ EXAMPLES = [
             "files": ["example_files/spiderman.gif"]
         }
     ],
-
+    [
+        {
+            "text": "今天上海的天气怎么样？",
+        }
+    ],
 ]
 
 image_extensions = Image.registered_extensions()
@@ -57,20 +68,113 @@ client = OpenAI(
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
+@lru_cache(maxsize=128)
+def extract_text_from_webpage(html_content):
+    """Extracts visible text from HTML content using BeautifulSoup."""
+    soup = BeautifulSoup(html_content, "html.parser")
+    for tag in soup(["script", "style", "header", "footer", "nav", "form", "svg"]):
+        tag.extract()
+    visible_text = soup.get_text(strip=True)
+    return visible_text
+
+def web_search(query: str) -> str:
+    """Performs a Baidu search and returns extracted text from the results as a single string."""
+    term = query
+    max_chars_per_page = 8000
+    all_results = ""
+    
+    with requests.Session() as session:
+        try:
+            resp = session.get(
+                url="https://www.baidu.com/s",
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/111.0"},
+                params={"wd": term, "num": 4},
+                timeout=5,
+                verify=False,
+            )
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            print(f"Error during initial request: {e}")
+            return ""
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        result_block = soup.find_all("div", attrs={"class": "result"})
+
+        for result in result_block:
+            link = result.find("a", href=True)
+            if link:
+                link = link["href"]
+                try:
+                    webpage = session.get(link, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/111.0"}, timeout=5, verify=False)
+                    webpage.raise_for_status()
+                    visible_text = extract_text_from_webpage(webpage.text)
+                    if len(visible_text) > max_chars_per_page:
+                        visible_text = visible_text[:max_chars_per_page]
+                    all_results += f"{link}\n{visible_text}\n\n"
+                except requests.exceptions.RequestException as e:
+                    all_results += f"{link}\nError fetching page: {e}\n\n"
+    
+    return all_results.strip()  # 去掉最后多余的换行符
+
 
 def model_inference(user_prompt, history):
     if user_prompt["files"]:
         messages, model = file_handler(user_prompt, history)
     else:
-        # 如果没有输入文本或历史记录，初始化为空
-        if history is None:
-            history = []
+        query = user_prompt["text"]
+        func_caller = []
+        functions_metadata = [
+            {"type": "function", "function": {"name": "web_search", "description": "Search query on google and find latest information, info about any person, object, place thing, everything that available on google.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "web search query"}}, "required": ["query"]}}},
+            {"type": "function", "function": {"name": "general_query", "description": "Reply general query of USER, with LLM like you. But it does not answer tough questions and latest info's.", "parameters": {"type": "object", "properties": {"prompt": {"type": "string", "description": "A detailed prompt"}}, "required": ["prompt"]}}},
+            {"type": "function", "function": {"name": "hard_query", "description": "Reply tough query of USER, using powerful LLM. But it does not answer latest info's.", "parameters": {"type": "object", "properties": {"prompt": {"type": "string", "description": "A detailed prompt"}}, "required": ["prompt"]}}},
+        ]
+        func_caller.append({"role": "user", "content": f'[SYSTEM]You are a helpful assistant. You have access to the following functions: \n{str(functions_metadata)}\n\nTo use these functions respond with:\n{{ "name": "function_name", "arguments": {{ "arg_1": "value_1", "arg_1": "value_1", ... }} }} , Reply in JSOn format, you can call only one function at a time, So, choose functions wisely. [USER] {user_prompt["text"]}'})
+        response = client.chat.completions.create(
+            model="qwen-plus",
+            messages=func_caller,
+        )
+        response = response.choices[0].message.content
+        function_name = json.loads(response)["name"]
+        if function_name == "web_search":
+            gr.Info("Searching Web")
+            yield "Searching Web"
+            
+            results = web_search(query)
+            
+            gr.Info("Extracting relevant Info")
+            yield "Extracting Relevant Info"
+            
+            # 定义一个递归字符文本拆分器，用于将文本分割成指定大小的块
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=512,  # 设定每个文本块的字符数
+                chunk_overlap=32,  # 设定文本块之间的重叠字符数
+                length_function=len,  # 使用len函数来计算文本长度
+            )
+            texts = text_splitter.split_text(results)  # 使用拆分器将提取的文本分割成多个部分
+            docsearch = FAISS.from_texts(texts, DashScopeEmbeddings())
 
-        # 将历史记录转换为消息格式，并追加当前用户输入
-        messages = history_to_messages(history, SYSTEM_PROMPT)
-        messages.append({'role': "user", 'content': user_prompt["text"]})
-        model = "qwen-plus"
+            query = user_prompt["text"]
+
+            docs = docsearch.similarity_search(query)
+            relvants = ""
+            for i in range(len(docs)):
+                relvants += docs[i].page_content
+
+            messages = history_to_messages(history, WEB_SYSTEM_PROMPT)
+            messages.append({"role": "user", "content": f"[USER] {query} ,  [WEB RESULTS] {relvants}"})
+            model = "qwen-plus"
+        else:
+            # 如果没有输入文本或历史记录，初始化为空
+            if history is None:
+                history = []
+
+            # 将历史记录转换为消息格式，并追加当前用户输入
+            messages = history_to_messages(history, SYSTEM_PROMPT)
+            messages.append({'role': "user", 'content': user_prompt["text"]})
+            model = "qwen-plus"
     
+    with open("messages.txt", "w") as file:
+        file.write(str(messages))
     # 调用模型生成响应，流式输出
     response = client.chat.completions.create(
         model=model,
@@ -169,12 +273,12 @@ def history_to_messages(history, system_prompt):
     """
     messages = [{'role': 'system', 'content': system_prompt}]
     for h in history:
+        # {'role': 'user', 'metadata': {'title': None}, 'content': FileMessage(file=FileData(path='/tmp/gradio/5693928f9416c62d60b5da87fef7d950bf68178743826b3c45d7dd6b1ee4f426/paper_with_text.png', url=None, size=None, orig_name=None, mime_type='image/png', is_stream=False, meta={'_type': 'gradio.FileData'}), alt_text=None)}
         if h["role"] == "user":
-            if type(h['content']) == tuple:
-                # 当用户上传图片或视频时，特殊处理此消息
-                messages.append({'role': "user", 'content': "用户上传了一张图片或者视频"})
-            else:
+            if type(h['content']) is str:
                 messages.append({'role': "user", 'content': h["content"]})
+            else:
+                messages.append({'role': "user", 'content': "用户上传了一个文件"})
         elif h["role"] == "assistant":
             messages.append({'role': "assistant", 'content': h["content"]})
     return messages
