@@ -68,9 +68,21 @@ client = OpenAI(
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
+# 使用lru_cache装饰器缓存函数结果，以提高性能，最多缓存128个不同的结果
 @lru_cache(maxsize=128)
 def extract_text_from_webpage(html_content):
-    """Extracts visible text from HTML content using BeautifulSoup."""
+    """
+    从HTML内容中提取可见文本。
+
+    该函数使用BeautifulSoup解析HTML内容，然后移除指定的标签（如脚本、样式、头部、底部、导航、表单、SVG等），
+    最后获取并返回剩余的可见文本，去除首尾的空白字符。
+
+    参数:
+    html_content (str): 要处理的HTML内容字符串。
+
+    返回:
+    str: 提取到的可见文本。
+    """
     soup = BeautifulSoup(html_content, "html.parser")
     for tag in soup(["script", "style", "header", "footer", "nav", "form", "svg"]):
         tag.extract()
@@ -78,7 +90,18 @@ def extract_text_from_webpage(html_content):
     return visible_text
 
 def web_search(query: str) -> str:
-    """Performs a Baidu search and returns extracted text from the results as a single string."""
+    """
+    在百度上执行搜索，并将搜索结果中的提取文本作为单个字符串返回。
+
+    首先发送搜索请求获取搜索结果页面，然后遍历每个结果链接，获取链接页面的可见文本内容，
+    对过长的文本进行截断处理，最后将所有结果拼接成一个字符串并返回，去掉最后多余的换行符。
+
+    参数:
+    query (str): 要在百度上搜索的查询字符串。
+
+    返回:
+    str: 包含所有搜索结果页面可见文本的拼接字符串。
+    """
     term = query
     max_chars_per_page = 8000
     all_results = ""
@@ -118,6 +141,20 @@ def web_search(query: str) -> str:
 
 
 def model_inference(user_prompt, history):
+    """
+    根据用户输入和历史记录进行模型推理，生成响应并以流式方式返回。
+
+    如果用户输入包含文件，则调用file_handler处理；否则根据用户输入的文本内容，
+    通过函数调用的方式让模型决定是否调用web_search等函数来获取相关信息，
+    最后将处理后的信息作为输入调用模型生成响应并流式输出。
+
+    参数:
+    user_prompt (dict): 包含用户输入信息的字典，可能包含文本和文件等信息。
+    history (list): 用户与助手之间的消息历史记录列表。
+
+    返回:
+    generator: 生成器，用于流式返回模型生成的响应内容。
+    """
     if user_prompt["files"]:
         messages, model = file_handler(user_prompt, history)
     else:
@@ -144,11 +181,11 @@ def model_inference(user_prompt, history):
             gr.Info("Extracting relevant Info")
             yield "Extracting Relevant Info"
             
-            # 定义一个递归字符文本拆分器，用于将文本分割成指定大小的块
             text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=512,  # 设定每个文本块的字符数
-                chunk_overlap=32,  # 设定文本块之间的重叠字符数
-                length_function=len,  # 使用len函数来计算文本长度
+                chunk_size=512,
+                # 设定文本块之间的重叠字符数
+                chunk_overlap=32,
+                length_function=len,
             )
             texts = text_splitter.split_text(results)  # 使用拆分器将提取的文本分割成多个部分
             docsearch = FAISS.from_texts(texts, DashScopeEmbeddings())
@@ -172,7 +209,7 @@ def model_inference(user_prompt, history):
             messages = history_to_messages(history, SYSTEM_PROMPT)
             messages.append({'role': "user", 'content': user_prompt["text"]})
             model = "qwen-plus"
-            
+
     # 调用模型生成响应，流式输出
     response = client.chat.completions.create(
         model=model,
@@ -190,6 +227,19 @@ def model_inference(user_prompt, history):
 
 
 def file_handler(user_prompt, history):
+    """
+    处理用户输入中包含文件的情况。
+
+    根据文件类型（PDF、视频、图片等）进行不同的处理，将文件内容转换为合适的格式，
+    并与用户输入的文本信息（如果有）一起构建成模型可接受的消息格式，同时确定要使用的模型版本。
+
+    参数:
+    user_prompt (dict): 包含用户输入信息的字典，其中包含文件相关信息。
+    history (list): 用户与助手之间的消息历史记录列表。
+
+    返回:
+    tuple: 包含处理后的消息列表和要使用的模型名称的元组。
+    """
     if history is None:
         history = []
 
@@ -225,6 +275,18 @@ def file_handler(user_prompt, history):
 
 
 def retrieval(user_prompt):
+    """
+    从用户上传的PDF文件中提取相关文本内容。
+
+    遍历PDF文件的每一页，提取文本信息，然后使用文本拆分器将提取的文本分割成合适大小的块，
+    接着通过向量搜索找到与用户输入查询相关的内容，并将这些相关内容拼接起来返回，同时加上用户输入的查询语句。
+
+    参数:
+    user_prompt (dict): 包含用户输入信息的字典，其中包含PDF文件相关信息。
+
+    返回:
+    str: 包含相关文本内容和用户查询语句的拼接字符串。
+    """
     # 初始化一个空字符串来存储提取的文本
     result = ''
     for file in user_prompt["files"]:
@@ -240,9 +302,10 @@ def retrieval(user_prompt):
 
     # 定义一个递归字符文本拆分器，用于将文本分割成指定大小的块
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=512,  # 设定每个文本块的字符数
-        chunk_overlap=32,  # 设定文本块之间的重叠字符数
-        length_function=len,  # 使用len函数来计算文本长度
+        chunk_size=512,
+        # 设定文本块之间的重叠字符数
+        chunk_overlap=32,
+        length_function=len,
     )
     texts = text_splitter.split_text(result)  # 使用拆分器将提取的文本分割成多个部分
 
@@ -263,11 +326,11 @@ def history_to_messages(history, system_prompt):
     将消息历史记录转换为模型可接受的消息格式。
 
     参数:
-    - history: 用户与助手之间的消息历史记录列表。
-    - system_prompt: 当前对话的系统提示，用于指导模型生成。
+    - history (list): 用户与助手之间的消息历史记录列表。
+    - system_prompt (str): 当前对话的系统提示，用于指导模型生成。
 
     返回:
-    - 包含用户与助手消息的列表，按时间顺序排列。
+    - list: 包含用户与助手消息的列表，按时间顺序排列。
     """
     messages = [{'role': 'system', 'content': system_prompt}]
     for h in history:

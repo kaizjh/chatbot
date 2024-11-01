@@ -1,0 +1,3 @@
+在pdf处理和网页抓取两个地方用到了retrieval，可以再优化
+pdf文件处理时可以在messages中加入'[user]: ..., [pdf/lib/extra info]: ...'
+历史记录能不能放进向量库，需要的东西随时检索出来？
